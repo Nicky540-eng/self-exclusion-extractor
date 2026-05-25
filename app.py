@@ -13,7 +13,7 @@ from openpyxl.utils import get_column_letter
 st.set_page_config(page_title="Registry Tracker", layout="wide")
 
 st.title("🎯 Precision Self-Exclusion Document Extractor")
-st.write("Production Version: Calibrated for Gauteng Gambling Board official 'SELF-BANNING ORDER' letter formats.")
+st.write("Production Version: High-precision text parsing calibrated for Gauteng Gambling Board official letter formats.")
 
 @st.cache_resource
 def load_ocr_reader():
@@ -26,10 +26,10 @@ except Exception as e:
 
 def extract_perfect_data(file_bytes, file_name):
     """
-    Precision extracts the full name and ID number from the official header line,
-    accounting for unpredictable handwriting, spaces, and formatting variations.
+    Safely parses the full name and 13-digit ID number from the official heading banner line
+    using clean string indexing to guarantee web server stability.
     """
-    # Safeguard fallback values pulled directly from filename structure
+    # Baseline fallback values pulled directly from filename structure
     base_name = os.path.splitext(file_name)[0].strip()
     full_name_clean = base_name.upper() if (base_name and not base_name.isspace()) else "UNKNOWN APPLICANT"
     id_number = "Not Found"
@@ -38,7 +38,7 @@ def extract_perfect_data(file_bytes, file_name):
         pdf = pdfium.PdfDocument(file_bytes)
         found_target = False
         
-        # Scan through the document pages (Header lives on Page 1)
+        # Scan through the document pages (Heading lives on Page 1)
         for page_idx in range(len(pdf)):
             page = pdf[page_idx]
             bitmap = page.render(scale=2.5) 
@@ -50,36 +50,41 @@ def extract_perfect_data(file_bytes, file_name):
             
             for line in ocr_results:
                 clean_line = line.strip()
+                line_upper = clean_line.upper()
                 
-                # Check for the core keywords to locate the exact banner line safely
-                if "SELF" in clean_line.upper() and "BANNING" in clean_line.upper() and "ORDER" in clean_line.upper():
+                # Core anchor validation keywords check
+                if "SELF" in line_upper and "BANNING" in line_upper and "ORDER" in line_upper:
                     
-                    # --- STEP 1: PARSE IDENTITY NUMBER ---
-                    # Strip away all spaces and non-digits to catch segmented IDs (e.g., 000722 5058 085)
-                    collapsed_line = re.sub(r'\D', '', clean_line)
+                    # --- STEP 1: PARSE IDENTITY NUMBER (Safe Extraction) ---
+                    # Keep only numeric characters to instantly unify space-separated IDs
+                    collapsed_line = "".join([c for c in clean_line if c.isdigit()])
                     id_match = re.search(r'\d{13}', collapsed_line)
                     if id_match:
                         id_number = id_match.group(0)
                     
-                    # --- STEP 2: PARSE FULL NAME ---
-                    # Separated split options using logical OR pipes (|) to bypass range formatting errors
-                    parts = re.split(r'–|-|:', clean_line)
+                    # --- STEP 2: PARSE FULL NAME (No-Regex Slicing) ---
+                    # Standardize common document punctuation separations to an arbitrary marker 'split_here'
+                    standardized_line = clean_line.replace("–", "split_here").replace("-", "split_here").replace(":", "split_here")
+                    parts = standardized_line.split("split_here")
                     
                     for part in parts:
                         part_upper = part.upper()
-                        # Isolate the segment containing the personal greeting title prefixes
+                        # Isolate the text segment containing the personal greeting title prefixes
                         if "MR." in part_upper or "MS." in part_upper or "MRS." in part_upper or "MR " in part_upper or "MS " in part_upper:
                             
-                            # Clean out titles, text markers, and metadata clutter
                             name_segment = part
+                            # Clean up the greeting title tags
                             for title in ["Ms.", "Ms", "Mr.", "Mr", "Mrs.", "Mrs"]:
                                 name_segment = name_segment.replace(title, "")
-                                
-                            # Strip out any lingering ID markers or raw digit chunks
-                            name_segment = re.sub(r'ID\s*No.*', '', name_segment, flags=re.IGNORECASE)
-                            name_segment = re.sub(r'\d+', '', name_segment)
                             
-                            # Final clean formatting trim
+                            # Clean up any "ID No" trailing fragments manually if present
+                            if "ID" in name_segment.upper():
+                                idx = name_segment.upper().find("ID")
+                                name_segment = name_segment[:idx]
+                                
+                            # Drop any random lingering numeric remnants 
+                            name_segment = "".join([c for c in name_segment if not c.isdigit()])
+                            
                             name_final = name_segment.strip()
                             if name_final and len(name_final) > 2:
                                 full_name_clean = name_final.upper()
