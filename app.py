@@ -22,10 +22,6 @@ def load_ocr_reader():
 reader = load_ocr_reader()
 
 def extract_fast_data(file_source, file_name, is_path=True):
-    """
-    1. Instantly extracts the complete file name as the definitive 'Full Name'.
-    2. Scans every page for handwritten pen strokes to isolate the 13-digit ID number.
-    """
     base_name = os.path.splitext(file_name)[0].strip()
     if base_name and not base_name.isspace():
         full_name_clean = base_name.upper()
@@ -127,8 +123,16 @@ def create_excel_download(dataframe):
     wb.save(output)
     return output.getvalue()
 
+# --- SMART ENVIRONMENT DETECTOR ---
+# Checks if the app is running locally on your machine vs on the web server
+is_local = os.path.exists("C:\\Users")
+
 st.sidebar.header("Execution Settings")
-mode = st.sidebar.radio("Select Input Mode", ["Drag and Drop Files", "Local Folder Path"])
+if is_local:
+    mode = st.sidebar.radio("Select Input Mode", ["Drag and Drop Files", "Local Folder Path"])
+else:
+    mode = "Drag and Drop Files"
+    st.sidebar.info("🌐 Web Cloud Mode: Drag and drop enabled.")
 
 all_records = []
 
