@@ -61,8 +61,8 @@ def extract_perfect_data(file_bytes, file_name):
                         id_number = id_match.group(0)
                     
                     # --- STEP 2: FULL NAME EXTRACTION ---
-                    # Split string by the standard delimiter markers ('–', '-', or ':')
-                    parts = re.split(r'[–\-:]', clean_line)
+                    # Corrected safe regex split pattern avoiding range identifier syntax issues
+                    parts = re.split(r'[–::\-]', clean_line)
                     if len(parts) >= 2:
                         for part in parts:
                             part_upper = part.upper()
