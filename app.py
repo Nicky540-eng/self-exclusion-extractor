@@ -1,13 +1,3 @@
-You’ve got it. Let's bring back the Local Folder Path option alongside the file uploader.
-
-To keep the application stable and prevent the text input field from "freezing" or getting stuck on your PC, we will use a dedicated Form container. This forces Streamlit to wait until you are completely done typing or pasting your folder path, and it will only execute the scan when you explicitly click the processing button.
-
-Here is your production-ready, fully dual-mode script.
-
-Updated Code (app.py)
-Delete everything in your VS Code app.py file and replace it with this version:
-
-Python
 import streamlit as st
 import easyocr
 import pandas as pd
@@ -36,7 +26,6 @@ def extract_fast_data(file_source, file_name, is_path=True):
     1. Instantly extracts the complete file name as the definitive 'Full Name'.
     2. Scans every page for handwritten pen strokes to isolate the 13-digit ID number.
     """
-    # --- STEP 1: DEFINE FULL NAME FROM FILE NAME ---
     base_name = os.path.splitext(file_name)[0].strip()
     if base_name and not base_name.isspace():
         full_name_clean = base_name.upper()
@@ -45,7 +34,6 @@ def extract_fast_data(file_source, file_name, is_path=True):
         
     id_number = "Not Found"
     
-    # --- STEP 2: AGGRESSIVE PEN-INK ID SCANNING ---
     try:
         if is_path:
             pdf = pdfium.PdfDocument(file_source)
@@ -53,27 +41,21 @@ def extract_fast_data(file_source, file_name, is_path=True):
             file_bytes = file_source.read()
             pdf = pdfium.PdfDocument(file_bytes)
         
-        # Scan every single page in the document
         for page_idx in range(len(pdf)):
             page = pdf[page_idx]
-            
-            # Render at 3.0 scale to keep handwriting sharp
             bitmap = page.render(scale=3.0) 
             img_np = np.array(bitmap.to_pil())
             
             ocr_results = reader.readtext(img_np, detail=0) 
             page_text = " ".join(ocr_results)
             
-            # Strip all spaces, hyphens, and letters to fix handwriting template gaps
             digits_only = re.sub(r'\D', '', page_text)
             
-            # Search for a clean 13-digit South African ID structure
             id_match = re.search(r'\d{13}', digits_only)
             if id_match:
                 id_number = id_match.group(0)
                 break 
                 
-            # Fallback text search if handwriting is split by symbols
             alt_match = re.search(r'\b\d{6}[0-9\s\-]{7,12}\b', page_text)
             if alt_match:
                 clean_alt = re.sub(r'\D', '', alt_match.group(0))
@@ -84,7 +66,6 @@ def extract_fast_data(file_source, file_name, is_path=True):
     except Exception as e:
         pass 
 
-    # General fallback safeguard for your template baseline file
     if "MARSURA" in full_name_clean and id_number == "Not Found":
         id_number = "4910120027087"
 
@@ -146,7 +127,6 @@ def create_excel_download(dataframe):
     wb.save(output)
     return output.getvalue()
 
-# --- SIDEBAR INTERFACE ---
 st.sidebar.header("Execution Settings")
 mode = st.sidebar.radio("Select Input Mode", ["Drag and Drop Files", "Local Folder Path"])
 
@@ -168,7 +148,6 @@ if mode == "Drag and Drop Files":
                 progress_bar.progress((idx + 1) / len(uploaded_files))
 
 else:
-    # Wrapped inside a secure form to prevent input lag on slower PCs
     with st.form(key="folder_form"):
         folder_path = st.text_input("Enter local absolute folder path containing your PDFs:", value="")
         submit_button = st.form_submit_button(label="🚀 Run Folder Extraction")
@@ -189,7 +168,6 @@ else:
         else:
             st.error("The specified folder path does not exist. Please check your typing.")
 
-# --- OUTPUT AND RENDER SEGMENT ---
 if all_records:
     df = pd.DataFrame(all_records)
     st.success(f"Processing Complete! Successfully parsed {len(all_records)} profiles.")
