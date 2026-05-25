@@ -12,8 +12,8 @@ from openpyxl.utils import get_column_letter
 
 st.set_page_config(page_title="Registry Tracker", layout="wide")
 
-st.title("⚡ Targeted Self-Exclusion Document Extractor")
-st.write("Production Version: High-precision extraction targeting the official 'SELF-BANNING ORDER' heading parameters.")
+st.title("🎯 Precision Self-Exclusion Document Extractor")
+st.write("Production Version: Calibrated for Gauteng Gambling Board official 'SELF-BANNING ORDER' letter formats.")
 
 @st.cache_resource
 def load_ocr_reader():
@@ -26,10 +26,10 @@ except Exception as e:
 
 def extract_perfect_data(file_bytes, file_name):
     """
-    Scans document lines to find 'SELF-BANNING ORDER' or 'SELF- BANNING ORDER'
-    and cleanly extracts the full name and 13-digit ID number.
+    Precision extracts the full name and ID number from the official header line,
+    accounting for unpredictable handwriting, spaces, and formatting variations.
     """
-    # Default fallback values pulled directly from filename structure if text scan fails
+    # Safeguard fallback values pulled directly from filename structure
     base_name = os.path.splitext(file_name)[0].strip()
     full_name_clean = base_name.upper() if (base_name and not base_name.isspace()) else "UNKNOWN APPLICANT"
     id_number = "Not Found"
@@ -38,7 +38,7 @@ def extract_perfect_data(file_bytes, file_name):
         pdf = pdfium.PdfDocument(file_bytes)
         found_target = False
         
-        # Scan through the document pages (Checking early pages first where the header lives)
+        # Scan through the document pages (Header lives on Page 1)
         for page_idx in range(len(pdf)):
             page = pdf[page_idx]
             bitmap = page.render(scale=2.5) 
@@ -50,34 +50,40 @@ def extract_perfect_data(file_bytes, file_name):
             
             for line in ocr_results:
                 clean_line = line.strip()
-                # Target the exact official header pattern
-                if "SELF-" in clean_line.upper() and "BANNING" in clean_line.upper() and "ORDER" in clean_line.upper():
+                
+                # Check for the core keywords to locate the exact banner line safely
+                if "SELF" in clean_line.upper() and "BANNING" in clean_line.upper() and "ORDER" in clean_line.upper():
                     
-                    # --- STEP 1: IDENTITY NUMBER EXTRACTION ---
-                    # Strip spaces to handle structured space formatting in the ID (e.g., 000722 5058 085)
-                    collapsed_line = clean_line.replace(" ", "").replace("-", "").replace(":", "")
+                    # --- STEP 1: PARSE IDENTITY NUMBER ---
+                    # Strip away all spaces and non-digits to catch segmented IDs (e.g., 000722 5058 085)
+                    collapsed_line = re.sub(r'\D', '', clean_line)
                     id_match = re.search(r'\d{13}', collapsed_line)
                     if id_match:
                         id_number = id_match.group(0)
                     
-                    # --- STEP 2: FULL NAME EXTRACTION ---
-                    # Corrected safe regex split pattern avoiding range identifier syntax issues
-                    parts = re.split(r'[–::\-]', clean_line)
-                    if len(parts) >= 2:
-                        for part in parts:
-                            part_upper = part.upper()
-                            # Locate the name block segment containing titles
-                            if "MR." in part_upper or "MS." in part_upper or "MRS." in part_upper:
-                                # Strip out standard titles to isolate the true raw identity
-                                name_segment = part.replace("Mr.", "").replace("Mr", "").replace("Ms.", "").replace("Ms", "").replace("Mrs.", "").replace("Mrs", "")
-                                # Remove any lingering ID remnants from the text segment string
-                                name_segment = re.sub(r'ID\s*No.*', '', name_segment, flags=re.IGNORECASE)
-                                name_segment = re.sub(r'\d+', '', name_segment)
+                    # --- STEP 2: PARSE FULL NAME ---
+                    # Separated split options using logical OR pipes (|) to bypass range formatting errors
+                    parts = re.split(r'–|-|:', clean_line)
+                    
+                    for part in parts:
+                        part_upper = part.upper()
+                        # Isolate the segment containing the personal greeting title prefixes
+                        if "MR." in part_upper or "MS." in part_upper or "MRS." in part_upper or "MR " in part_upper or "MS " in part_upper:
+                            
+                            # Clean out titles, text markers, and metadata clutter
+                            name_segment = part
+                            for title in ["Ms.", "Ms", "Mr.", "Mr", "Mrs.", "Mrs"]:
+                                name_segment = name_segment.replace(title, "")
                                 
-                                name_final = name_segment.strip()
-                                if name_final:
-                                    full_name_clean = name_final.upper()
-                                    break
+                            # Strip out any lingering ID markers or raw digit chunks
+                            name_segment = re.sub(r'ID\s*No.*', '', name_segment, flags=re.IGNORECASE)
+                            name_segment = re.sub(r'\d+', '', name_segment)
+                            
+                            # Final clean formatting trim
+                            name_final = name_segment.strip()
+                            if name_final and len(name_final) > 2:
+                                full_name_clean = name_final.upper()
+                                break
                     
                     found_target = True
                     break
