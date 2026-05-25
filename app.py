@@ -13,15 +13,22 @@ from openpyxl.utils import get_column_letter
 st.set_page_config(page_title="Registry Tracker", layout="wide")
 
 st.title("⚡ Fast-Track Self-Exclusion Extractor")
-st.write("Production Version: Full Names mapped from filenames. Deep scanning optimized for handwritten pen ink.")
+st.write("Cloud-Optimized Version: Full Names mapped from filenames. High-efficiency scanning active for handwritten pen ink.")
 
 @st.cache_resource
 def load_ocr_reader():
     return easyocr.Reader(['en'], gpu=False)
 
-reader = load_ocr_reader()
+try:
+    reader = load_ocr_reader()
+except Exception as e:
+    st.error(f"OCR Engine Initialization Error: {e}")
 
-def extract_fast_data(file_source, file_name, is_path=True):
+def extract_fast_data(file_source, file_name, is_path=False):
+    """
+    1. Instantly maps the file name string to a single 'Full Name' field.
+    2. Memory-optimized dynamic scan over document pages for a 13-digit sequence.
+    """
     base_name = os.path.splitext(file_name)[0].strip()
     if base_name and not base_name.isspace():
         full_name_clean = base_name.upper()
@@ -39,12 +46,16 @@ def extract_fast_data(file_source, file_name, is_path=True):
         
         for page_idx in range(len(pdf)):
             page = pdf[page_idx]
-            bitmap = page.render(scale=3.0) 
-            img_np = np.array(bitmap.to_pil())
+            
+            # Dropped scale to 2.0 and forced grayscale conversion to protect server RAM limits
+            bitmap = page.render(scale=2.0) 
+            pil_img = bitmap.to_pil().convert('L') # Convert to Grayscale
+            img_np = np.array(pil_img)
             
             ocr_results = reader.readtext(img_np, detail=0) 
             page_text = " ".join(ocr_results)
             
+            # Strip spaces to clean up handwritten box splits
             digits_only = re.sub(r'\D', '', page_text)
             
             id_match = re.search(r'\d{13}', digits_only)
@@ -123,8 +134,7 @@ def create_excel_download(dataframe):
     wb.save(output)
     return output.getvalue()
 
-# --- SMART ENVIRONMENT DETECTOR ---
-# Checks if the app is running locally on your machine vs on the web server
+# Web safety layout restriction
 is_local = os.path.exists("C:\\Users")
 
 st.sidebar.header("Execution Settings")
@@ -132,7 +142,7 @@ if is_local:
     mode = st.sidebar.radio("Select Input Mode", ["Drag and Drop Files", "Local Folder Path"])
 else:
     mode = "Drag and Drop Files"
-    st.sidebar.info("🌐 Web Cloud Mode: Drag and drop enabled.")
+    st.sidebar.info("🌐 Web Cloud Mode Enabled.")
 
 all_records = []
 
@@ -170,7 +180,7 @@ else:
             else:
                 st.warning("No PDF files found inside that directory path.")
         else:
-            st.error("The specified folder path does not exist. Please check your typing.")
+            st.error("The specified folder path does not exist.")
 
 if all_records:
     df = pd.DataFrame(all_records)
