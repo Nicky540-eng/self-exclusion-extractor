@@ -12,8 +12,8 @@ from openpyxl.utils import get_column_letter
 
 st.set_page_config(page_title="Registry Tracker", layout="wide")
 
-st.title("⚡ Fast-Track Self-Exclusion Folder Extractor")
-st.write("Production Version: Upload entire folders instantly. Full Names mapped from filenames, and ID numbers scanned dynamically.")
+st.title("⚡ Targeted Self-Exclusion Document Extractor")
+st.write("Production Version: High-precision extraction targeting the official 'SELF-BANNING ORDER' heading parameters.")
 
 @st.cache_resource
 def load_ocr_reader():
@@ -24,52 +24,69 @@ try:
 except Exception as e:
     st.error(f"OCR Engine Initialization Error: {e}")
 
-def extract_fast_data(file_bytes, file_name):
+def extract_perfect_data(file_bytes, file_name):
     """
-    1. Instantly maps the file name string to a single 'Full Name' field.
-    2. Memory-optimized dynamic scan over document pages for a 13-digit sequence.
+    Scans document lines to find 'SELF-BANNING ORDER' or 'SELF- BANNING ORDER'
+    and cleanly extracts the full name and 13-digit ID number.
     """
+    # Default fallback values pulled directly from filename structure if text scan fails
     base_name = os.path.splitext(file_name)[0].strip()
-    if base_name and not base_name.isspace():
-        full_name_clean = base_name.upper()
-    else:
-        full_name_clean = "UNKNOWN APPLICANT"
-        
+    full_name_clean = base_name.upper() if (base_name and not base_name.isspace()) else "UNKNOWN APPLICANT"
     id_number = "Not Found"
     
     try:
         pdf = pdfium.PdfDocument(file_bytes)
+        found_target = False
         
+        # Scan through the document pages (Checking early pages first where the header lives)
         for page_idx in range(len(pdf)):
             page = pdf[page_idx]
-            
-            # Grayscale 2.0 scale to capture pen ink while protecting server memory
-            bitmap = page.render(scale=2.0) 
+            bitmap = page.render(scale=2.5) 
             pil_img = bitmap.to_pil().convert('L')
             img_np = np.array(pil_img)
             
+            # Read line-by-line text segments
             ocr_results = reader.readtext(img_np, detail=0) 
-            page_text = " ".join(ocr_results)
             
-            digits_only = re.sub(r'\D', '', page_text)
-            
-            id_match = re.search(r'\d{13}', digits_only)
-            if id_match:
-                id_number = id_match.group(0)
-                break 
-                
-            alt_match = re.search(r'\b\d{6}[0-9\s\-]{7,12}\b', page_text)
-            if alt_match:
-                clean_alt = re.sub(r'\D', '', alt_match.group(0))
-                if len(clean_alt) >= 13:
-                    id_number = clean_alt[:13]
+            for line in ocr_results:
+                clean_line = line.strip()
+                # Target the exact official header pattern
+                if "SELF-" in clean_line.upper() and "BANNING" in clean_line.upper() and "ORDER" in clean_line.upper():
+                    
+                    # --- STEP 1: IDENTITY NUMBER EXTRACTION ---
+                    # Strip spaces to handle structured space formatting in the ID (e.g., 000722 5058 085)
+                    collapsed_line = clean_line.replace(" ", "").replace("-", "").replace(":", "")
+                    id_match = re.search(r'\d{13}', collapsed_line)
+                    if id_match:
+                        id_number = id_match.group(0)
+                    
+                    # --- STEP 2: FULL NAME EXTRACTION ---
+                    # Split string by the standard delimiter markers ('–', '-', or ':')
+                    parts = re.split(r'[–\-:]', clean_line)
+                    if len(parts) >= 2:
+                        for part in parts:
+                            part_upper = part.upper()
+                            # Locate the name block segment containing titles
+                            if "MR." in part_upper or "MS." in part_upper or "MRS." in part_upper:
+                                # Strip out standard titles to isolate the true raw identity
+                                name_segment = part.replace("Mr.", "").replace("Mr", "").replace("Ms.", "").replace("Ms", "").replace("Mrs.", "").replace("Mrs", "")
+                                # Remove any lingering ID remnants from the text segment string
+                                name_segment = re.sub(r'ID\s*No.*', '', name_segment, flags=re.IGNORECASE)
+                                name_segment = re.sub(r'\d+', '', name_segment)
+                                
+                                name_final = name_segment.strip()
+                                if name_final:
+                                    full_name_clean = name_final.upper()
+                                    break
+                    
+                    found_target = True
                     break
-                        
+            
+            if found_target:
+                break
+                
     except Exception as e:
         pass 
-
-    if "MARSURA" in full_name_clean and id_number == "Not Found":
-        id_number = "4910120027087"
 
     return {
         "File Name": file_name,
@@ -132,7 +149,6 @@ def create_excel_download(dataframe):
 st.sidebar.header("Execution Settings")
 st.sidebar.info("🌐 Web Folder Mode Active")
 
-# Enhanced file uploader widget with deep native folder compilation active
 uploaded_files = st.file_uploader(
     "Drag and drop your target compliance folder here, or click to browse:", 
     type=["pdf"], 
@@ -141,11 +157,11 @@ uploaded_files = st.file_uploader(
 
 if uploaded_files:
     all_records = []
-    if st.button("🚀 Run Folder Extraction Pipeline"):
+    if st.button("🚀 Run Targeted Extraction Pipeline"):
         progress_bar = st.progress(0)
         for idx, uploaded_file in enumerate(uploaded_files):
             file_bytes = uploaded_file.read()
-            record = extract_fast_data(file_bytes, uploaded_file.name)
+            record = extract_perfect_data(file_bytes, uploaded_file.name)
             all_records.append(record)
             progress_bar.progress((idx + 1) / len(uploaded_files))
 
