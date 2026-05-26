@@ -1,5 +1,6 @@
 streamlit
 easyocr
 pandas
+numpy
 pypdfium2
 openpyxl
