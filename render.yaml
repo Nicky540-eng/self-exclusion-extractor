@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: compliance-extractor-dashboard
+    env: python
+    buildCommand: apt-get update && apt-get install -y libgl1 libglib2.0-bin && pip install -r requirements.txt
+    startCommand: streamlit run app.py --server.port $PORT --server.address 0.0.0.0
