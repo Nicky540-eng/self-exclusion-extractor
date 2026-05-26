@@ -13,12 +13,10 @@ from openpyxl.utils import get_column_letter
 st.set_page_config(page_title="Registry Tracker", layout="wide")
 
 st.title("🎯 Precision Self-Exclusion Folder Extractor")
-st.write("Production Version: Drag and drop files from your 'Selfban' folder to extract unseparated names and pristine identity numbers.")
+st.write("Drag and drop multiple files to extract unseparated names and identity numbers seamlessly.")
 
-# --- CACHE THE ENGINE TO PREVENT LAG ---
 @st.cache_resource
 def load_ocr_reader():
-    """Loads the OCR engine once into memory so the app stays fast."""
     return easyocr.Reader(['en'], gpu=False)
 
 try:
@@ -27,18 +25,12 @@ except Exception as e:
     st.error(f"OCR Engine Initialization Error: {e}")
 
 def extract_perfect_data(file_bytes, file_name):
-    """
-    Directly extracts the unseparated full name and the 13-digit identity number
-    from the exact GGB letter format layout structure provided.
-    """
     base_name = os.path.splitext(file_name)[0].strip()
     full_name_clean = base_name.upper() if (base_name and not base_name.isspace()) else "UNKNOWN APPLICANT"
     id_number = "Not Found"
     
     try:
         pdf = pdfium.PdfDocument(file_bytes)
-        
-        # Target Page 1 where the official circular header resides
         page = pdf[0]
         bitmap = page.render(scale=2.5) 
         pil_img = bitmap.to_pil().convert('L')
@@ -47,7 +39,6 @@ def extract_perfect_data(file_bytes, file_name):
         ocr_results = reader.readtext(img_np, detail=0) 
         full_page_text = " ".join(ocr_results)
         
-        # --- 1. IDENTITY NUMBER EXTRACTION ---
         id_regex_match = re.search(r'ID\s*No\.?\s*([\d\s\-]+)', full_page_text, re.IGNORECASE)
         if id_regex_match:
             raw_digits = re.sub(r'\D', '', id_regex_match.group(1))
@@ -56,14 +47,12 @@ def extract_perfect_data(file_bytes, file_name):
             elif raw_digits:
                 id_number = raw_digits
                 
-        # Fallback: If OCR split the line layout, pull any continuous 13-digit block from the page
         if id_number == "Not Found":
             collapsed_text = full_page_text.replace(" ", "").replace("-", "").replace("–", "")
             global_id_match = re.search(r'\d{13}', collapsed_text)
             if global_id_match:
                 id_number = global_id_match.group(0)
 
-        # --- 2. FULL NAME EXTRACTION (UNSEPARATED) ---
         for line in ocr_results:
             line_upper = line.strip().upper()
             if "SELF" in line_upper and "BAN" in line_upper:
@@ -76,28 +65,20 @@ def extract_perfect_data(file_bytes, file_name):
                         name_segment = part
                         for title in ["Ms.", "Ms", "Mr.", "Mr", "Mrs.", "Mrs"]:
                             name_segment = name_segment.replace(title, "")
-                        
                         if "ID" in name_segment.upper():
                             idx_id = name_segment.upper().find("ID")
                             name_segment = name_segment[:idx_id]
-                            
                         name_segment = "".join([c for c in name_segment if not c.isdigit()])
                         name_final = name_segment.strip()
                         if name_final and len(name_final) > 2:
                             full_name_clean = name_final.upper()
                             break
-
-    except Exception as e:
+    except Exception:
         pass
 
-    return {
-        "File Name": file_name,
-        "Full Name": full_name_clean,
-        "Identity Number": id_number
-    }
+    return {"File Name": file_name, "Full Name": full_name_clean, "Identity Number": id_number}
 
 def create_excel_download(dataframe):
-    """Generates a beautifully formatted and padded Excel tracker file."""
     output = io.BytesIO()
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -112,7 +93,7 @@ def create_excel_download(dataframe):
     fill_zebra = PatternFill(start_color="F2F5F8", end_color="F2F5F8", fill_type="solid")
     thin_border = Border(left=Side(style='thin', color='D9D9D9'), right=Side(style='thin', color='D9D9D9'), top=Side(style='thin', color='D9D9D9'), bottom=Side(style='thin', color='D9D9D9'))
     
-    ws['A1'] = "Gauteng Gambling Board - Verified Registry Extraction"
+    ws['A1'] = "Gauteng Gambling Board - Drive Automated Registry Extraction"
     ws['A1'].font = font_title
     
     headers = ["File Name", "Full Name", "Identity Number"]
@@ -132,7 +113,7 @@ def create_excel_download(dataframe):
                 cell.fill = fill_zebra
             if col_idx == 3:
                 cell.alignment = Alignment(horizontal="center")
-                cell.number_format = '@'  # Enforces explicit text formatting to preserve leading zeros
+                cell.number_format = '@' 
             else:
                 cell.alignment = Alignment(horizontal="left")
                 
@@ -146,12 +127,8 @@ def create_excel_download(dataframe):
     wb.save(output)
     return output.getvalue()
 
-# --- STREAMLIT UI SIDEBAR AND UPLOADER AREA ---
-st.sidebar.header("Execution Settings")
-st.sidebar.info("🌐 Web Folder Mode Active")
-
 uploaded_files = st.file_uploader(
-    "Drag and drop your compliance files or highlight everything in your 'Selfban' folder here:", 
+    "Drag and drop your compliance PDFs here (Highlight all files inside your folder and drag them together):", 
     type=["pdf"], 
     accept_multiple_files=True
 )
@@ -164,20 +141,15 @@ if uploaded_files:
         
         for idx, uploaded_file in enumerate(uploaded_files):
             status_text.text(f"⏳ Processing profile [{idx+1}/{len(uploaded_files)}]: {uploaded_file.name}")
-            
             file_bytes = uploaded_file.read()
             record = extract_perfect_data(file_bytes, uploaded_file.name)
             all_records.append(record)
-            
-            # Tick the progress bar smoothly
             progress_bar.progress((idx + 1) / len(uploaded_files))
             
-        status_text.text("🎉 Extraction loop finished successfully!")
+        status_text.text("🎉 Extraction complete!")
         
     if all_records:
         df = pd.DataFrame(all_records)
-        st.success(f"Successfully finalized {len(all_records)} registry profiles!")
-        
         st.subheader("📋 Processed Data Preview")
         st.dataframe(df, use_container_width=True)
         
