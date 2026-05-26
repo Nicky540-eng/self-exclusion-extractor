@@ -1,7 +1,6 @@
 streamlit
 easyocr
-opencv-python-headless
-pandas
-numpy
 pypdfium2
 openpyxl
+pandas
+numpy
