@@ -12,11 +12,13 @@ from openpyxl.utils import get_column_letter
 
 st.set_page_config(page_title="Registry Tracker", layout="wide")
 
-st.title("🎯 Precision Self-Exclusion Document Extractor")
-st.write("Production Version: High-precision text parsing calibrated for Gauteng Gambling Board official letter formats.")
+st.title("🎯 Precision Self-Exclusion Folder Extractor")
+st.write("Production Version: Drag and drop files from your 'Selfban' folder to extract unseparated names and pristine identity numbers.")
 
+# --- CACHE THE ENGINE TO PREVENT LAG ---
 @st.cache_resource
 def load_ocr_reader():
+    """Loads the OCR engine once into memory so the app stays fast."""
     return easyocr.Reader(['en'], gpu=False)
 
 try:
@@ -26,78 +28,67 @@ except Exception as e:
 
 def extract_perfect_data(file_bytes, file_name):
     """
-    Safely parses the full name and 13-digit ID number from the official heading banner line
-    using clean string indexing to guarantee web server stability.
+    Directly extracts the unseparated full name and the 13-digit identity number
+    from the exact GGB letter format layout structure provided.
     """
-    # Baseline fallback values pulled directly from filename structure
     base_name = os.path.splitext(file_name)[0].strip()
     full_name_clean = base_name.upper() if (base_name and not base_name.isspace()) else "UNKNOWN APPLICANT"
     id_number = "Not Found"
     
     try:
         pdf = pdfium.PdfDocument(file_bytes)
-        found_target = False
         
-        # Scan through the document pages (Heading lives on Page 1)
-        for page_idx in range(len(pdf)):
-            page = pdf[page_idx]
-            bitmap = page.render(scale=2.5) 
-            pil_img = bitmap.to_pil().convert('L')
-            img_np = np.array(pil_img)
-            
-            # Read line-by-line text segments
-            ocr_results = reader.readtext(img_np, detail=0) 
-            
-            for line in ocr_results:
-                clean_line = line.strip()
-                line_upper = clean_line.upper()
+        # Target Page 1 where the official circular header resides
+        page = pdf[0]
+        bitmap = page.render(scale=2.5) 
+        pil_img = bitmap.to_pil().convert('L')
+        img_np = np.array(pil_img)
+        
+        ocr_results = reader.readtext(img_np, detail=0) 
+        full_page_text = " ".join(ocr_results)
+        
+        # --- 1. IDENTITY NUMBER EXTRACTION ---
+        id_regex_match = re.search(r'ID\s*No\.?\s*([\d\s\-]+)', full_page_text, re.IGNORECASE)
+        if id_regex_match:
+            raw_digits = re.sub(r'\D', '', id_regex_match.group(1))
+            if len(raw_digits) >= 13:
+                id_number = raw_digits[:13]
+            elif raw_digits:
+                id_number = raw_digits
                 
-                # Core anchor validation keywords check
-                if "SELF" in line_upper and "BANNING" in line_upper and "ORDER" in line_upper:
-                    
-                    # --- STEP 1: PARSE IDENTITY NUMBER (Safe Extraction) ---
-                    # Keep only numeric characters to instantly unify space-separated IDs
-                    collapsed_line = "".join([c for c in clean_line if c.isdigit()])
-                    id_match = re.search(r'\d{13}', collapsed_line)
-                    if id_match:
-                        id_number = id_match.group(0)
-                    
-                    # --- STEP 2: PARSE FULL NAME (No-Regex Slicing) ---
-                    # Standardize common document punctuation separations to an arbitrary marker 'split_here'
-                    standardized_line = clean_line.replace("–", "split_here").replace("-", "split_here").replace(":", "split_here")
-                    parts = standardized_line.split("split_here")
-                    
-                    for part in parts:
-                        part_upper = part.upper()
-                        # Isolate the text segment containing the personal greeting title prefixes
-                        if "MR." in part_upper or "MS." in part_upper or "MRS." in part_upper or "MR " in part_upper or "MS " in part_upper:
-                            
-                            name_segment = part
-                            # Clean up the greeting title tags
-                            for title in ["Ms.", "Ms", "Mr.", "Mr", "Mrs.", "Mrs"]:
-                                name_segment = name_segment.replace(title, "")
-                            
-                            # Clean up any "ID No" trailing fragments manually if present
-                            if "ID" in name_segment.upper():
-                                idx = name_segment.upper().find("ID")
-                                name_segment = name_segment[:idx]
-                                
-                            # Drop any random lingering numeric remnants 
-                            name_segment = "".join([c for c in name_segment if not c.isdigit()])
-                            
-                            name_final = name_segment.strip()
-                            if name_final and len(name_final) > 2:
-                                full_name_clean = name_final.upper()
-                                break
-                    
-                    found_target = True
-                    break
-            
-            if found_target:
-                break
+        # Fallback: If OCR split the line layout, pull any continuous 13-digit block from the page
+        if id_number == "Not Found":
+            collapsed_text = full_page_text.replace(" ", "").replace("-", "").replace("–", "")
+            global_id_match = re.search(r'\d{13}', collapsed_text)
+            if global_id_match:
+                id_number = global_id_match.group(0)
+
+        # --- 2. FULL NAME EXTRACTION (UNSEPARATED) ---
+        for line in ocr_results:
+            line_upper = line.strip().upper()
+            if "SELF" in line_upper and "BAN" in line_upper:
+                standardized_line = line.replace("–", "split_here").replace("-", "split_here").replace(":", "split_here")
+                parts = standardized_line.split("split_here")
                 
+                for part in parts:
+                    part_upper = part.upper()
+                    if any(title in part_upper for title in ["MR.", "MS.", "MRS.", "MR ", "MS "]):
+                        name_segment = part
+                        for title in ["Ms.", "Ms", "Mr.", "Mr", "Mrs.", "Mrs"]:
+                            name_segment = name_segment.replace(title, "")
+                        
+                        if "ID" in name_segment.upper():
+                            idx_id = name_segment.upper().find("ID")
+                            name_segment = name_segment[:idx_id]
+                            
+                        name_segment = "".join([c for c in name_segment if not c.isdigit()])
+                        name_final = name_segment.strip()
+                        if name_final and len(name_final) > 2:
+                            full_name_clean = name_final.upper()
+                            break
+
     except Exception as e:
-        pass 
+        pass
 
     return {
         "File Name": file_name,
@@ -106,6 +97,7 @@ def extract_perfect_data(file_bytes, file_name):
     }
 
 def create_excel_download(dataframe):
+    """Generates a beautifully formatted and padded Excel tracker file."""
     output = io.BytesIO()
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -118,11 +110,7 @@ def create_excel_download(dataframe):
     
     fill_header = PatternFill(start_color="1F497D", end_color="1F497D", fill_type="solid")
     fill_zebra = PatternFill(start_color="F2F5F8", end_color="F2F5F8", fill_type="solid")
-    
-    thin_border = Border(
-        left=Side(style='thin', color='D9D9D9'), right=Side(style='thin', color='D9D9D9'),
-        top=Side(style='thin', color='D9D9D9'), bottom=Side(style='thin', color='D9D9D9')
-    )
+    thin_border = Border(left=Side(style='thin', color='D9D9D9'), right=Side(style='thin', color='D9D9D9'), top=Side(style='thin', color='D9D9D9'), bottom=Side(style='thin', color='D9D9D9'))
     
     ws['A1'] = "Gauteng Gambling Board - Verified Registry Extraction"
     ws['A1'].font = font_title
@@ -144,6 +132,7 @@ def create_excel_download(dataframe):
                 cell.fill = fill_zebra
             if col_idx == 3:
                 cell.alignment = Alignment(horizontal="center")
+                cell.number_format = '@'  # Enforces explicit text formatting to preserve leading zeros
             else:
                 cell.alignment = Alignment(horizontal="left")
                 
@@ -157,11 +146,12 @@ def create_excel_download(dataframe):
     wb.save(output)
     return output.getvalue()
 
+# --- STREAMLIT UI SIDEBAR AND UPLOADER AREA ---
 st.sidebar.header("Execution Settings")
 st.sidebar.info("🌐 Web Folder Mode Active")
 
 uploaded_files = st.file_uploader(
-    "Drag and drop your target compliance folder here, or click to browse:", 
+    "Drag and drop your compliance files or highlight everything in your 'Selfban' folder here:", 
     type=["pdf"], 
     accept_multiple_files=True
 )
@@ -170,15 +160,23 @@ if uploaded_files:
     all_records = []
     if st.button("🚀 Run Targeted Extraction Pipeline"):
         progress_bar = st.progress(0)
+        status_text = st.empty()
+        
         for idx, uploaded_file in enumerate(uploaded_files):
+            status_text.text(f"⏳ Processing profile [{idx+1}/{len(uploaded_files)}]: {uploaded_file.name}")
+            
             file_bytes = uploaded_file.read()
             record = extract_perfect_data(file_bytes, uploaded_file.name)
             all_records.append(record)
+            
+            # Tick the progress bar smoothly
             progress_bar.progress((idx + 1) / len(uploaded_files))
-
+            
+        status_text.text("🎉 Extraction loop finished successfully!")
+        
     if all_records:
         df = pd.DataFrame(all_records)
-        st.success(f"Processing Complete! Successfully parsed {len(all_records)} profiles.")
+        st.success(f"Successfully finalized {len(all_records)} registry profiles!")
         
         st.subheader("📋 Processed Data Preview")
         st.dataframe(df, use_container_width=True)
